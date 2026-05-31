@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,height=device-height,initial-scale=1.0">
+
+<title>Cinematic Visual</title>
+
+<style>
+
+html,body{
+    margin:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#000;
+}
+
+#renderCanvas{
+    width:100%;
+    height:100%;
+    touch-action:none;
+    display:block;
+}
+
+#ui{
+    position:absolute;
+    inset:0;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    z-index:20;
+    background:#000;
+}
+
+#fileInput{
+    font-size:18px;
+}
+
+</style>
+
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+
+</head>
+<body>
+
+<div id="ui">
+    <input type="file" id="fileInput" accept="image/*">
+</div>
+
+<canvas id="renderCanvas"></canvas>
+
+<script>
+
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas,true);
+
+let scene;
+let camera;
+let plane;
+let planeMaterial;
+
+let zoom = 1;
+
+function createScene(){
+
+    scene = new BABYLON.Scene(engine);
+
+    camera = new BABYLON.FreeCamera(
+        "cam",
+        new BABYLON.Vector3(0,0,-3),
+        scene
+    );
+
+    camera.setTarget(BABYLON.Vector3.Zero());
+
+    plane = BABYLON.MeshBuilder.CreatePlane(
+        "photo",
+        {
+            width:2,
+            height:3.555
+        },
+        scene
+    );
+
+    planeMaterial =
+        new BABYLON.StandardMaterial(
+            "mat",
+            scene
+        );
+
+    planeMaterial.disableLighting = true;
+    planeMaterial.emissiveColor =
+        new BABYLON.Color3(1,1,1);
+
+    plane.material = planeMaterial;
+
+    createParticles();
+    createLightFlare();
+    createVignette();
+
+    return scene;
+}
+
+function createParticles(){
+
+    const ps =
+        new BABYLON.ParticleSystem(
+            "dust",
+            300,
+            scene
+        );
+
+    ps.particleTexture =
+        new BABYLON.Texture(
+            "https://playground.babylonjs.com/textures/flare.png",
+            scene
+        );
+
+    ps.emitter =
+        new BABYLON.Vector3(0,0,0);
+
+    ps.minEmitBox =
+        new BABYLON.Vector3(-2,-4,-1);
+
+    ps.maxEmitBox =
+        new BABYLON.Vector3(2,4,1);
+
+    ps.color1 =
+        new BABYLON.Color4(1,1,1,0.15);
+
+    ps.color2 =
+        new BABYLON.Color4(1,1,1,0.05);
+
+    ps.minSize = 0.05;
+    ps.maxSize = 0.15;
+
+    ps.minLifeTime = 8;
+    ps.maxLifeTime = 14;
+
+    ps.emitRate = 20;
+
+    ps.direction1 =
+        new BABYLON.Vector3(-0.03,0.08,0);
+
+    ps.direction2 =
+        new BABYLON.Vector3(0.03,0.12,0);
+
+    ps.blendMode =
+        BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+
+    ps.start();
+}
+
+function createLightFlare(){
+
+    const flare =
+        BABYLON.MeshBuilder.CreatePlane(
+            "flare",
+            {
+                width:1.8,
+                height:8
+            },
+            scene
+        );
+
+    flare.position.x = -1.5;
+    flare.position.z = -0.2;
+
+    const mat =
+        new BABYLON.StandardMaterial(
+            "flareMat",
+            scene
+        );
+
+    mat.disableLighting = true;
+
+    mat.emissiveColor =
+        new BABYLON.Color3(
+            0.25,
+            0.25,
+            0.25
+        );
+
+    mat.alpha = 0.08;
+
+    flare.material = mat;
+
+    scene.registerBeforeRender(()=>{
+
+        flare.position.x =
+            Math.sin(
+                performance.now()*0.0002
+            )*1.2;
+
+    });
+
+}
+
+function createVignette(){
+
+    const pipeline =
+        new BABYLON.DefaultRenderingPipeline(
+            "pipe",
+            true,
+            scene,
+            [camera]
+        );
+
+    pipeline.imageProcessingEnabled = true;
+
+    pipeline.vignetteEnabled = true;
+
+    pipeline.vignetteWeight = 2.5;
+
+    pipeline.vignetteStretch = 0.4;
+
+}
+
+function loadImage(file){
+
+    const reader =
+        new FileReader();
+
+    reader.onload = function(e){
+
+        const img =
+            new Image();
+
+        img.onload = function(){
+
+            const aspect =
+                img.width /
+                img.height;
+
+            plane.scaling.x =
+                aspect;
+
+            plane.scaling.y = 1;
+
+            planeMaterial.diffuseTexture =
+                new BABYLON.Texture(
+                    img.src,
+                    scene
+                );
+
+        };
+
+        img.src =
+            e.target.result;
+
+    };
+
+    reader.readAsDataURL(file);
+}
+
+document
+.getElementById("fileInput")
+.addEventListener(
+"change",
+(e)=>{
+
+    if(!scene)
+        createScene();
+
+    loadImage(
+        e.target.files[0]
+    );
+
+    document
+    .getElementById("ui")
+    .style.display =
+    "none";
+
+});
+
+engine.runRenderLoop(()=>{
+
+    if(!scene) return;
+
+    zoom += 0.00005;
+
+    plane.scaling.scaleInPlace(
+        1.00001
+    );
+
+    scene.render();
+
+});
+
+window.addEventListener(
+"resize",
+()=>engine.resize()
+);
+
+</script>
+
+</body>
+</html>
