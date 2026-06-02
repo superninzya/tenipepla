@@ -1,40 +1,165 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Cinematic Photo FX</title>
-
+<meta charset="UTF-8" />
+<title>Sky Fog Scene</title>
 <style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: black;
+    height: 100%;
+  }
+  #renderCanvas {
+    width: 100vw;
+    height: 100vh;
+    touch-action: none;
+    display: block;
+  }
+  #hint {
+    position: absolute;
+    bottom: 20px;
+    width: 100%;
+    text-align: center;
+    color: rgba(255,255,255,0.5);
+    font-family: sans-serif;
+    font-size: 14px;
+    pointer-events: none;
+  }
+</style>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+</head>
 
-html,body{
-    margin:0;
-    height:100%;
-    background:#000;
-    overflow:hidden;
+<body>
+<canvas id="renderCanvas"></canvas>
+<div id="hint">Click anywhere to load background image</div>
+
+<input type="file" id="fileInput" accept="image/*" style="display:none"/>
+
+<script>
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+
+let scene;
+
+function createScene() {
+    scene = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0,0,0,1);
+
+    const camera = new BABYLON.ArcRotateCamera(
+        "cam",
+        -Math.PI / 2,
+        Math.PI / 2,
+        10,
+        BABYLON.Vector3.Zero(),
+        scene
+    );
+    camera.attachControl(canvas, true);
+    camera.inputs.clear(); // фиксируем камеру
+
+    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    light.intensity = 1;
+
+    // Плоскость под фон (9:16)
+    const bgPlane = BABYLON.MeshBuilder.CreatePlane("bg", {width: 9, height: 16}, scene);
+    bgPlane.position.z = 5;
+
+    const bgMaterial = new BABYLON.StandardMaterial("bgMat", scene);
+    bgMaterial.backFaceCulling = false;
+    bgPlane.material = bgMaterial;
+
+    // функция загрузки текстуры фона с "cover" эффектом
+    function setBackground(img) {
+        const tex = new BABYLON.Texture(img, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
+
+        tex.onLoadObservable.add(() => {
+            const ratioImg = tex.getSize().width / tex.getSize().height;
+            const ratioPlane = 9 / 16;
+
+            if (ratioImg > ratioPlane) {
+                bgPlane.scaling.x = ratioImg / ratioPlane;
+                bgPlane.scaling.y = 1;
+            } else {
+                bgPlane.scaling.y = ratioPlane / ratioImg;
+                bgPlane.scaling.x = 1;
+            }
+
+            bgMaterial.diffuseTexture = tex;
+        });
+    }
+
+    // ===== Облака (простые мягкие сферы) =====
+    const clouds = [];
+    for (let i = 0; i < 25; i++) {
+        const cloud = BABYLON.MeshBuilder.CreateSphere("c"+i, {diameter: Math.random()*1.5 + 0.5}, scene);
+        cloud.position.x = (Math.random() - 0.5) * 8;
+        cloud.position.y = (Math.random() - 0.5) * 12;
+        cloud.position.z = 2 + Math.random() * 2;
+
+        const mat = new BABYLON.StandardMaterial("cm"+i, scene);
+        mat.emissiveColor = new BABYLON.Color3(1,1,1);
+        mat.alpha = 0.08 + Math.random()*0.05;
+        cloud.material = mat;
+
+        clouds.push(cloud);
+    }
+
+    // ===== "языки тумана" (движение через волны) =====
+    const fogPlane = BABYLON.MeshBuilder.CreatePlane("fog", {width: 12, height: 20}, scene);
+    fogPlane.position.z = 1;
+
+    const fogMat = new BABYLON.StandardMaterial("fogMat", scene);
+    fogMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
+    fogMat.alpha = 0.12;
+    fogMat.backFaceCulling = false;
+    fogPlane.material = fogMat;
+
+    let t = 0;
+    scene.registerBeforeRender(() => {
+        t += 0.01;
+
+        // движение облаков
+        clouds.forEach((c, i) => {
+            c.position.x += Math.sin(t + i) * 0.002;
+            c.position.y += Math.cos(t + i*0.5) * 0.002;
+        });
+
+        // "туман" как живое колыхание
+        fogPlane.position.x = Math.sin(t) * 0.2;
+        fogPlane.position.y = Math.cos(t*0.7) * 0.1;
+        fogMat.alpha = 0.10 + Math.sin(t*1.5)*0.03;
+    });
+
+    // загрузка файла по клику
+    const input = document.getElementById("fileInput");
+
+    window.addEventListener("click", () => input.click());
+
+    input.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const url = URL.createObjectURL(file);
+        setBackground(url);
+    });
+
+    return scene;
 }
 
-#ui{
-    position:absolute;
-    inset:0;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    background:#000;
-    z-index:10;
-}
+scene = createScene();
 
-#file{
-    font-size:18px;
-    color:#fff;
-}
+engine.runRenderLoop(() => {
+    scene.render();
+});
 
-#wrap{
-    position:relative;
-    width:100%;
-    height:100%;
-    overflow:hidden;
+window.addEventListener("resize", () => {
+    engine.resize();
+});
+</script>
+
+</body>
+</html>    overflow:hidden;
     display:none;
 }
 
