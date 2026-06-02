@@ -2,39 +2,140 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Sky Fog Scene</title>
+<title>Sky Fog Fixed</title>
 <style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background: black;
-    height: 100%;
-  }
-  #renderCanvas {
-    width: 100vw;
-    height: 100vh;
-    touch-action: none;
-    display: block;
-  }
-  #hint {
-    position: absolute;
-    bottom: 20px;
-    width: 100%;
-    text-align: center;
-    color: rgba(255,255,255,0.5);
-    font-family: sans-serif;
-    font-size: 14px;
-    pointer-events: none;
-  }
+html, body {
+  margin: 0;
+  overflow: hidden;
+  background: black;
+  height: 100%;
+}
+#renderCanvas {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+#hint {
+  position: absolute;
+  bottom: 20px;
+  width: 100%;
+  text-align: center;
+  color: rgba(255,255,255,0.4);
+  font-family: sans-serif;
+  font-size: 14px;
+}
 </style>
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 
 <body>
 <canvas id="renderCanvas"></canvas>
-<div id="hint">Click anywhere to load background image</div>
+<div id="hint">Click to load image</div>
+<input type="file" id="fileInput" accept="image/*" style="display:none"/>
 
+<script>
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+
+let scene;
+
+function createScene() {
+  const scene = new BABYLON.Scene(engine);
+
+  const camera = new BABYLON.ArcRotateCamera(
+    "cam",
+    -Math.PI / 2,
+    Math.PI / 2,
+    10,
+    BABYLON.Vector3.Zero(),
+    scene
+  );
+  camera.attachControl(canvas, true);
+  camera.inputs.clear();
+
+  new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+
+  // ===== BACKGROUND =====
+  const bg = BABYLON.MeshBuilder.CreatePlane("bg", {width: 9, height: 16}, scene);
+  bg.position.z = 5;
+
+  const mat = new BABYLON.StandardMaterial("m", scene);
+  mat.backFaceCulling = false;
+  mat.disableLighting = true;
+  bg.material = mat;
+
+  function setImage(url) {
+    const tex = new BABYLON.Texture(url, scene);
+
+    tex.onLoadObservable.add(() => {
+      const w = tex.getSize().width;
+      const h = tex.getSize().height;
+
+      const imgRatio = w / h;
+      const planeRatio = 9 / 16;
+
+      bg.scaling.x = 1;
+      bg.scaling.y = 1;
+
+      // FIX: правильное вписывание (без переворота)
+      if (imgRatio > planeRatio) {
+        bg.scaling.x = imgRatio / planeRatio;
+      } else {
+        bg.scaling.y = planeRatio / imgRatio;
+      }
+
+      mat.diffuseTexture = tex;
+      mat.diffuseTexture.vScale = -1; // 🔥 FIX переворота (ключевой момент)
+    });
+  }
+
+  // ===== REAL FOG (shader-like plane) =====
+  const fog = BABYLON.MeshBuilder.CreatePlane("fog", {width: 12, height: 20}, scene);
+  fog.position.z = 2;
+
+  const fogMat = new BABYLON.StandardMaterial("fogMat", scene);
+  fogMat.disableLighting = true;
+  fogMat.emissiveColor = new BABYLON.Color3(1,1,1);
+  fogMat.alpha = 0.08;
+  fogMat.backFaceCulling = false;
+
+  // шумовая текстура вместо кругов
+  const noiseTex = new BABYLON.NoiseProceduralTexture("noise", 256, scene);
+  noiseTex.animationSpeedFactor = 1.5;
+
+  fogMat.opacityTexture = noiseTex;
+  fog.material = fogMat;
+
+  let t = 0;
+  scene.registerBeforeRender(() => {
+    t += 0.005;
+    fog.position.x = Math.sin(t) * 0.2;
+    fog.position.y = Math.cos(t*0.7) * 0.1;
+    fogMat.alpha = 0.06 + Math.sin(t*1.2)*0.02;
+  });
+
+  // ===== LOAD IMAGE =====
+  const input = document.getElementById("fileInput");
+
+  window.addEventListener("click", () => input.click());
+
+  input.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImage(URL.createObjectURL(file));
+  });
+
+  return scene;
+}
+
+scene = createScene();
+
+engine.runRenderLoop(() => scene.render());
+window.addEventListener("resize", () => engine.resize());
+</script>
+
+</body>
+</html>
 <input type="file" id="fileInput" accept="image/*" style="display:none"/>
 
 <script>
