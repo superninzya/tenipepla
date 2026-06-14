@@ -1,955 +1,378 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-<meta charset="utf-8">
-<title>Maxx Fridd Visual</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visual FX</title>
 
 <style>
-html,body{
-margin:0;
-height:100%;
-background:#000;
-overflow:hidden;
-display:flex;
-justify-content:center;
-align-items:center;
+html, body{
+    margin:0;
+    background:#000;
+    overflow:hidden;
+    height:100%;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    font-family:Arial,sans-serif;
 }
 
-#controls{
-position:absolute;
-z-index:10;
-display:flex;
-gap:10px;
+#container{
+    position:relative;
 }
 
 canvas{
-height:100vh;
-aspect-ratio:9/16;
-display:block;
+    display:block;
+    background:#000;
+}
+
+.controls{
+    position:fixed;
+    top:10px;
+    left:10px;
+    z-index:10;
+    display:flex;
+    gap:10px;
 }
 </style>
 </head>
 <body>
 
-<div id="controls">
-<input type="file" id="imageInput" accept="image/*">
-<input type="file" id="audioInput" accept="audio/*">
+<div class="controls">
+    <input type="file" id="imageInput" accept="image/*">
+    <input type="file" id="audioInput" accept="audio/*">
 </div>
 
-<canvas id="c"></canvas>
+<div id="container">
+    <canvas id="canvas" width="1080" height="1920"></canvas>
+</div>
 
 <script>
 
-const canvas = document.getElementById("c");
+const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-let W,H;
-
-function resize(){
-    H = window.innerHeight;
-    W = H * 9 / 16;
-
-    canvas.width = W;
-    canvas.height = H;
-}
-resize();
-window.addEventListener("resize",resize);
+const W = canvas.width;
+const H = canvas.height;
 
 let image = null;
 
 const particles = [];
 
-for(let i=0;i<250;i++){
+for(let i=0;i<200;i++){
     particles.push({
         x:Math.random()*W,
         y:Math.random()*H,
-        s:Math.random()*2+0.5,
-        vx:(Math.random()-0.5)*0.2,
-        vy:(Math.random()-0.5)*0.2
+        r:Math.random()*4+1,
+        speed:Math.random()*0.4+0.1,
+        alpha:Math.random()
     });
 }
 
 let analyser = null;
-let dataArray = null;
-let audioLevel = 0;
+let freqData = null;
 
-document.getElementById("audioInput").addEventListener("change",e=>{
+document.getElementById("imageInput").addEventListener("change",(e)=>{
 
     const file = e.target.files[0];
+    if(!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = function(ev){
+
+        image = new Image();
+
+        image.onload = ()=>{
+            animate();
+        };
+
+        image.src = ev.target.result;
+    };
+
+    reader.readAsDataURL(file);
+});
+
+document.getElementById("audioInput").addEventListener("change", async (e)=>{
+
+    const file = e.target.files[0];
+    if(!file) return;
 
     const audio = new Audio(URL.createObjectURL(file));
-    audio.loop = true;
 
-    const audioCtx = new AudioContext();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    const src = audioCtx.createMediaElementSource(audio);
+    const source = audioCtx.createMediaElementSource(audio);
 
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
 
-    src.connect(analyser);
+    source.connect(analyser);
     analyser.connect(audioCtx.destination);
 
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    freqData = new Uint8Array(analyser.frequencyBinCount);
 
     audio.play();
-
-});
-
-document.getElementById("imageInput").addEventListener("change",e=>{
-
-    const file = e.target.files[0];
-
-    image = new Image();
-
-    image.onload = ()=>{
-
-        document.getElementById("controls").style.display="none";
-
-    }
-
-    image.src = URL.createObjectURL(file);
-
 });
 
 function getAudioLevel(){
 
     if(!analyser) return 0;
 
-    analyser.getByteFrequencyData(dataArray);
+    analyser.getByteFrequencyData(freqData);
 
     let sum=0;
 
-    for(let i=0;i<dataArray.length;i++){
-        sum+=dataArray[i];
+    for(let i=0;i<freqData.length;i++){
+        sum += freqData[i];
     }
 
-    return sum/dataArray.length/255;
-
+    return sum/freqData.length/255;
 }
 
-let time=0;
+function drawImage(){
 
-function render(){
+    if(!image) return;
 
-    requestAnimationFrame(render);
+    ctx.drawImage(
+        image,
+        0,
+        0,
+        W,
+        H
+    );
+}
 
-    time += 0.01;
+function drawFog(time, audio){
 
-    audioLevel = getAudioLevel();
+    const fogAlpha = 0.03 + audio*0.08;
 
-    ctx.clearRect(0,0,W,H);
+    for(let i=0;i<6;i++){
 
-    if(image){
-
-        const imgRatio = image.width/image.height;
-        const canvasRatio = W/H;
-
-        let drawW, drawH;
-
-        if(imgRatio > canvasRatio){
-            drawH = H;
-            drawW = H*imgRatio;
-        }else{
-            drawW = W;
-            drawH = W/imgRatio;
-        }
-
-        const dx = (W-drawW)/2;
-        const dy = (H-drawH)/2;
-
-        const distortion =
-            Math.sin(time*2)*5 +
-            audioLevel*25;
-
-        ctx.drawImage(
-            image,
-            dx+distortion,
-            dy,
-            drawW,
-            drawH
-        );
-    }
-
-    // volumetric fog
-
-    for(let i=0;i<10;i++){
+        const x =
+            W*0.5 +
+            Math.sin(time*0.0002+i)*300;
 
         const y =
-            (i/10)*H +
-            Math.sin(time+i)*50;
+            H*0.5 +
+            Math.cos(time*0.00015+i)*600;
 
-        const g = ctx.createLinearGradient(
-            0,y,
-            W,y+200
+        const radius =
+            450 +
+            Math.sin(time*0.001+i)*150;
+
+        const g = ctx.createRadialGradient(
+            x,y,0,
+            x,y,radius
         );
 
-        g.addColorStop(0,
-            `rgba(255,255,255,${
-            0.01+audioLevel*0.04
-            })`
-        );
-
-        g.addColorStop(1,
-            'rgba(255,255,255,0)'
-        );
+        g.addColorStop(0,`rgba(255,255,255,${fogAlpha})`);
+        g.addColorStop(1,"rgba(255,255,255,0)");
 
         ctx.fillStyle=g;
+        ctx.beginPath();
+        ctx.arc(x,y,radius,0,Math.PI*2);
+        ctx.fill();
+    }
+}
+
+function drawLightBeams(time,audio){
+
+    ctx.save();
+
+    ctx.globalCompositeOperation="screen";
+
+    for(let i=0;i<8;i++){
+
+        const angle =
+            time*0.00005 +
+            i*0.7;
+
+        const x =
+            W/2 +
+            Math.sin(angle)*400;
+
+        const beamWidth =
+            60 +
+            audio*250;
+
+        const grad =
+            ctx.createLinearGradient(
+                x,0,
+                x,H
+            );
+
+        grad.addColorStop(
+            0,
+            `rgba(255,255,255,${0.04+audio*0.12})`
+        );
+
+        grad.addColorStop(
+            1,
+            "rgba(255,255,255,0)"
+        );
+
+        ctx.fillStyle=grad;
 
         ctx.fillRect(
+            x-beamWidth/2,
             0,
-            y,
-            W,
-            250
+            beamWidth,
+            H
         );
     }
 
-    // particles
+    ctx.restore();
+}
+
+function drawParticles(audio){
+
+    ctx.save();
+
+    ctx.globalCompositeOperation="screen";
 
     particles.forEach(p=>{
 
-        p.x += p.vx;
-        p.y += p.vy;
+        p.y -= p.speed + audio*3;
 
-        if(p.x<0)p.x=W;
-        if(p.x>W)p.x=0;
-
-        if(p.y<0)p.y=H;
-        if(p.y>H)p.y=0;
-
-        const alpha =
-            0.05 +
-            audioLevel*0.2;
-
-        ctx.fillStyle=
-            `rgba(255,255,255,${alpha})`;
+        if(p.y < -10){
+            p.y = H + 10;
+            p.x = Math.random()*W;
+        }
 
         ctx.beginPath();
+
+        ctx.fillStyle =
+            `rgba(255,255,255,${
+                p.alpha*(0.3+audio)
+            })`;
 
         ctx.arc(
             p.x,
             p.y,
-            p.s + audioLevel*2,
+            p.r + audio*4,
             0,
             Math.PI*2
         );
 
         ctx.fill();
-
     });
 
-    // audio pulse
-
-    const pulse =
-        20 +
-        audioLevel*200;
-
-    const grad =
-        ctx.createRadialGradient(
-            W/2,H/2,
-            0,
-            W/2,H/2,
-            pulse*4
-        );
-
-    grad.addColorStop(
-        0,
-        `rgba(255,255,255,${
-        audioLevel*0.2
-        })`
-    );
-
-    grad.addColorStop(
-        1,
-        'rgba(255,255,255,0)'
-    );
-
-    ctx.fillStyle = grad;
-    ctx.fillRect(0,0,W,H);
-
+    ctx.restore();
 }
 
-render();
+function drawVisualizer(audio){
 
-</script>
-</body>
-</html>const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
+    const bars = 64;
 
-let scene;
+    const centerY = H*0.85;
 
-function createScene() {
-  const scene = new BABYLON.Scene(engine);
+    ctx.save();
 
-  const camera = new BABYLON.ArcRotateCamera(
-    "cam",
-    -Math.PI / 2,
-    Math.PI / 2,
-    10,
-    BABYLON.Vector3.Zero(),
-    scene
-  );
-  camera.attachControl(canvas, true);
-  camera.inputs.clear();
+    ctx.globalCompositeOperation="screen";
 
-  new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene);
+    for(let i=0;i<bars;i++){
 
-  // ===== BACKGROUND =====
-  const bg = BABYLON.MeshBuilder.CreatePlane("bg", {width: 9, height: 16}, scene);
-  bg.position.z = 5;
+        let v = audio;
 
-  const mat = new BABYLON.StandardMaterial("m", scene);
-  mat.backFaceCulling = false;
-  mat.disableLighting = true;
-  bg.material = mat;
-
-  function setImage(url) {
-    const tex = new BABYLON.Texture(url, scene);
-
-    tex.onLoadObservable.add(() => {
-      const w = tex.getSize().width;
-      const h = tex.getSize().height;
-
-      const imgRatio = w / h;
-      const planeRatio = 9 / 16;
-
-      bg.scaling.x = 1;
-      bg.scaling.y = 1;
-
-      // FIX: правильное вписывание (без переворота)
-      if (imgRatio > planeRatio) {
-        bg.scaling.x = imgRatio / planeRatio;
-      } else {
-        bg.scaling.y = planeRatio / imgRatio;
-      }
-
-      mat.diffuseTexture = tex;
-      mat.diffuseTexture.vScale = -1; // 🔥 FIX переворота (ключевой момент)
-    });
-  }
-
-  // ===== REAL FOG (shader-like plane) =====
-  const fog = BABYLON.MeshBuilder.CreatePlane("fog", {width: 12, height: 20}, scene);
-  fog.position.z = 2;
-
-  const fogMat = new BABYLON.StandardMaterial("fogMat", scene);
-  fogMat.disableLighting = true;
-  fogMat.emissiveColor = new BABYLON.Color3(1,1,1);
-  fogMat.alpha = 0.08;
-  fogMat.backFaceCulling = false;
-
-  // шумовая текстура вместо кругов
-  const noiseTex = new BABYLON.NoiseProceduralTexture("noise", 256, scene);
-  noiseTex.animationSpeedFactor = 1.5;
-
-  fogMat.opacityTexture = noiseTex;
-  fog.material = fogMat;
-
-  let t = 0;
-  scene.registerBeforeRender(() => {
-    t += 0.005;
-    fog.position.x = Math.sin(t) * 0.2;
-    fog.position.y = Math.cos(t*0.7) * 0.1;
-    fogMat.alpha = 0.06 + Math.sin(t*1.2)*0.02;
-  });
-
-  // ===== LOAD IMAGE =====
-  const input = document.getElementById("fileInput");
-
-  window.addEventListener("click", () => input.click());
-
-  input.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImage(URL.createObjectURL(file));
-  });
-
-  return scene;
-}
-
-scene = createScene();
-
-engine.runRenderLoop(() => scene.render());
-window.addEventListener("resize", () => engine.resize());
-</script>
-
-</body>
-</html>
-<input type="file" id="fileInput" accept="image/*" style="display:none"/>
-
-<script>
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas, true);
-
-let scene;
-
-function createScene() {
-    scene = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0,0,0,1);
-
-    const camera = new BABYLON.ArcRotateCamera(
-        "cam",
-        -Math.PI / 2,
-        Math.PI / 2,
-        10,
-        BABYLON.Vector3.Zero(),
-        scene
-    );
-    camera.attachControl(canvas, true);
-    camera.inputs.clear(); // фиксируем камеру
-
-    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
-    light.intensity = 1;
-
-    // Плоскость под фон (9:16)
-    const bgPlane = BABYLON.MeshBuilder.CreatePlane("bg", {width: 9, height: 16}, scene);
-    bgPlane.position.z = 5;
-
-    const bgMaterial = new BABYLON.StandardMaterial("bgMat", scene);
-    bgMaterial.backFaceCulling = false;
-    bgPlane.material = bgMaterial;
-
-    // функция загрузки текстуры фона с "cover" эффектом
-    function setBackground(img) {
-        const tex = new BABYLON.Texture(img, scene, false, false, BABYLON.Texture.TRILINEAR_SAMPLINGMODE);
-
-        tex.onLoadObservable.add(() => {
-            const ratioImg = tex.getSize().width / tex.getSize().height;
-            const ratioPlane = 9 / 16;
-
-            if (ratioImg > ratioPlane) {
-                bgPlane.scaling.x = ratioImg / ratioPlane;
-                bgPlane.scaling.y = 1;
-            } else {
-                bgPlane.scaling.y = ratioPlane / ratioImg;
-                bgPlane.scaling.x = 1;
-            }
-
-            bgMaterial.diffuseTexture = tex;
-        });
-    }
-
-    // ===== Облака (простые мягкие сферы) =====
-    const clouds = [];
-    for (let i = 0; i < 25; i++) {
-        const cloud = BABYLON.MeshBuilder.CreateSphere("c"+i, {diameter: Math.random()*1.5 + 0.5}, scene);
-        cloud.position.x = (Math.random() - 0.5) * 8;
-        cloud.position.y = (Math.random() - 0.5) * 12;
-        cloud.position.z = 2 + Math.random() * 2;
-
-        const mat = new BABYLON.StandardMaterial("cm"+i, scene);
-        mat.emissiveColor = new BABYLON.Color3(1,1,1);
-        mat.alpha = 0.08 + Math.random()*0.05;
-        cloud.material = mat;
-
-        clouds.push(cloud);
-    }
-
-    // ===== "языки тумана" (движение через волны) =====
-    const fogPlane = BABYLON.MeshBuilder.CreatePlane("fog", {width: 12, height: 20}, scene);
-    fogPlane.position.z = 1;
-
-    const fogMat = new BABYLON.StandardMaterial("fogMat", scene);
-    fogMat.emissiveColor = new BABYLON.Color3(0.9,0.9,0.9);
-    fogMat.alpha = 0.12;
-    fogMat.backFaceCulling = false;
-    fogPlane.material = fogMat;
-
-    let t = 0;
-    scene.registerBeforeRender(() => {
-        t += 0.01;
-
-        // движение облаков
-        clouds.forEach((c, i) => {
-            c.position.x += Math.sin(t + i) * 0.002;
-            c.position.y += Math.cos(t + i*0.5) * 0.002;
-        });
-
-        // "туман" как живое колыхание
-        fogPlane.position.x = Math.sin(t) * 0.2;
-        fogPlane.position.y = Math.cos(t*0.7) * 0.1;
-        fogMat.alpha = 0.10 + Math.sin(t*1.5)*0.03;
-    });
-
-    // загрузка файла по клику
-    const input = document.getElementById("fileInput");
-
-    window.addEventListener("click", () => input.click());
-
-    input.addEventListener("change", (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const url = URL.createObjectURL(file);
-        setBackground(url);
-    });
-
-    return scene;
-}
-
-scene = createScene();
-
-engine.runRenderLoop(() => {
-    scene.render();
-});
-
-window.addEventListener("resize", () => {
-    engine.resize();
-});
-</script>
-
-</body>
-</html>    overflow:hidden;
-    display:none;
-}
-
-#photo{
-    position:absolute;
-    top:50%;
-    left:50%;
-    transform:translate(-50%,-50%);
-    height:100%;
-    width:auto;
-    min-width:100%;
-    object-fit:cover;
-    animation:zoom 18s ease-in-out infinite;
-}
-
-@keyframes zoom{
-    0%{ transform:translate(-50%,-50%) scale(1); }
-    50%{ transform:translate(-50%,-50%) scale(1.04); }
-    100%{ transform:translate(-50%,-50%) scale(1); }
-}
-
-/* Vignette */
-#vignette{
-    position:absolute;
-    inset:0;
-    background:radial-gradient(circle,
-        rgba(0,0,0,0) 40%,
-        rgba(0,0,0,0.65) 100%);
-    pointer-events:none;
-}
-
-/* Light leak */
-#leak{
-    position:absolute;
-    width:60%;
-    height:120%;
-    left:-30%;
-    top:-10%;
-    background:linear-gradient(120deg,
-        rgba(255,120,80,0.0),
-        rgba(255,120,80,0.15),
-        rgba(255,200,120,0.0));
-    filter:blur(40px);
-    opacity:0.5;
-    animation:leakMove 10s ease-in-out infinite;
-    pointer-events:none;
-}
-
-@keyframes leakMove{
-    0%{ transform:translateX(0); opacity:0.2; }
-    50%{ transform:translateX(120%); opacity:0.4; }
-    100%{ transform:translateX(0); opacity:0.2; }
-}
-
-/* Grain canvas */
-#grain{
-    position:absolute;
-    inset:0;
-    pointer-events:none;
-    opacity:0.12;
-}
-
-/* dust particles */
-.particle{
-    position:absolute;
-    width:4px;
-    height:4px;
-    background:#fff;
-    border-radius:50%;
-    opacity:0.2;
-    animation:float linear infinite;
-}
-
-@keyframes float{
-    from{
-        transform:translateY(0);
-        opacity:0;
-    }
-    20%{opacity:0.3;}
-    to{
-        transform:translateY(-120vh);
-        opacity:0;
-    }
-}
-
-</style>
-
-</head>
-<body>
-
-<div id="ui">
-    <input id="file" type="file" accept="image/*">
-</div>
-
-<div id="wrap">
-
-    <img id="photo">
-
-    <div id="leak"></div>
-    <div id="vignette"></div>
-
-    <canvas id="grain"></canvas>
-
-</div>
-
-<script>
-
-const file = document.getElementById("file");
-const wrap = document.getElementById("wrap");
-const photo = document.getElementById("photo");
-const canvas = document.getElementById("grain");
-const ctx = canvas.getContext("2d");
-
-file.onchange = (e)=>{
-
-    const f = e.target.files[0];
-    const url = URL.createObjectURL(f);
-
-    photo.src = url;
-
-    document.getElementById("ui").style.display="none";
-    wrap.style.display="block";
-
-    spawnParticles();
-    startGrain();
-};
-
-/* -------- Grain -------- */
-
-function startGrain(){
-
-    function resize(){
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-    }
-
-    resize();
-    window.addEventListener("resize",resize);
-
-    function draw(){
-
-        const w = canvas.width;
-        const h = canvas.height;
-
-        const img = ctx.createImageData(w,h);
-
-        for(let i=0;i<img.data.length;i+=4){
-
-            const v = Math.random()*255;
-
-            img.data[i]=v;
-            img.data[i+1]=v;
-            img.data[i+2]=v;
-            img.data[i+3]=18;
-
+        if(freqData){
+            v = freqData[i]/255;
         }
 
-        ctx.putImageData(img,0,0);
+        const x =
+            (i/(bars-1))*W;
 
-        requestAnimationFrame(draw);
+        const h =
+            30 +
+            v*400;
 
+        const grad =
+            ctx.createLinearGradient(
+                0,
+                centerY-h,
+                0,
+                centerY
+            );
+
+        grad.addColorStop(
+            0,
+            "rgba(255,255,255,0.9)"
+        );
+
+        grad.addColorStop(
+            1,
+            "rgba(255,255,255,0)"
+        );
+
+        ctx.fillStyle=grad;
+
+        ctx.fillRect(
+            x-4,
+            centerY-h,
+            8,
+            h
+        );
     }
 
-    draw();
+    ctx.restore();
 }
 
-/* -------- Particles -------- */
+function drawGlow(audio){
 
-function spawnParticles(){
+    const radius =
+        300 +
+        audio*600;
 
-    for(let i=0;i<25;i++){
+    const g =
+        ctx.createRadialGradient(
+            W/2,
+            H/2,
+            0,
+            W/2,
+            H/2,
+            radius
+        );
 
-        const p = document.createElement("div");
-        p.className="particle";
+    g.addColorStop(
+        0,
+        `rgba(255,255,255,${0.05+audio*0.2})`
+    );
 
-        p.style.left = Math.random()*100 + "vw";
-        p.style.top = "100vh";
+    g.addColorStop(
+        1,
+        "rgba(255,255,255,0)"
+    );
 
-        const duration = 6 + Math.random()*10;
+    ctx.fillStyle=g;
+    ctx.fillRect(0,0,W,H);
+}
 
-        p.style.animationDuration = duration + "s";
-        p.style.opacity = Math.random()*0.3;
+let started=false;
 
-        document.body.appendChild(p);
+function animate(time=0){
 
+    if(started===false){
+        started=true;
     }
 
+    requestAnimationFrame(animate);
+
+    ctx.clearRect(0,0,W,H);
+
+    const audio = getAudioLevel();
+
+    drawImage();
+
+    drawFog(time,audio);
+
+    drawLightBeams(time,audio);
+
+    drawParticles(audio);
+
+    drawGlow(audio);
+
+    drawVisualizer(audio);
 }
-
-</script>
-
-</body>
-</html>    font-size:18px;
-}
-
-</style>
-
-<script src="https://cdn.babylonjs.com/babylon.js"></script>
-
-</head>
-<body>
-
-<div id="ui">
-    <input type="file" id="fileInput" accept="image/*">
-</div>
-
-<canvas id="renderCanvas"></canvas>
-
-<script>
-
-const canvas = document.getElementById("renderCanvas");
-const engine = new BABYLON.Engine(canvas,true);
-
-let scene;
-let camera;
-let plane;
-let planeMaterial;
-
-let zoom = 1;
-
-function createScene(){
-
-    scene = new BABYLON.Scene(engine);
-
-    camera = new BABYLON.FreeCamera(
-        "cam",
-        new BABYLON.Vector3(0,0,-3),
-        scene
-    );
-
-    camera.setTarget(BABYLON.Vector3.Zero());
-
-    plane = BABYLON.MeshBuilder.CreatePlane(
-        "photo",
-        {
-            width:2,
-            height:3.555
-        },
-        scene
-    );
-
-    planeMaterial =
-        new BABYLON.StandardMaterial(
-            "mat",
-            scene
-        );
-
-    planeMaterial.disableLighting = true;
-    planeMaterial.emissiveColor =
-        new BABYLON.Color3(1,1,1);
-
-    plane.material = planeMaterial;
-
-    createParticles();
-    createLightFlare();
-    createVignette();
-
-    return scene;
-}
-
-function createParticles(){
-
-    const ps =
-        new BABYLON.ParticleSystem(
-            "dust",
-            300,
-            scene
-        );
-
-    ps.particleTexture =
-        new BABYLON.Texture(
-            "https://playground.babylonjs.com/textures/flare.png",
-            scene
-        );
-
-    ps.emitter =
-        new BABYLON.Vector3(0,0,0);
-
-    ps.minEmitBox =
-        new BABYLON.Vector3(-2,-4,-1);
-
-    ps.maxEmitBox =
-        new BABYLON.Vector3(2,4,1);
-
-    ps.color1 =
-        new BABYLON.Color4(1,1,1,0.15);
-
-    ps.color2 =
-        new BABYLON.Color4(1,1,1,0.05);
-
-    ps.minSize = 0.05;
-    ps.maxSize = 0.15;
-
-    ps.minLifeTime = 8;
-    ps.maxLifeTime = 14;
-
-    ps.emitRate = 20;
-
-    ps.direction1 =
-        new BABYLON.Vector3(-0.03,0.08,0);
-
-    ps.direction2 =
-        new BABYLON.Vector3(0.03,0.12,0);
-
-    ps.blendMode =
-        BABYLON.ParticleSystem.BLENDMODE_STANDARD;
-
-    ps.start();
-}
-
-function createLightFlare(){
-
-    const flare =
-        BABYLON.MeshBuilder.CreatePlane(
-            "flare",
-            {
-                width:1.8,
-                height:8
-            },
-            scene
-        );
-
-    flare.position.x = -1.5;
-    flare.position.z = -0.2;
-
-    const mat =
-        new BABYLON.StandardMaterial(
-            "flareMat",
-            scene
-        );
-
-    mat.disableLighting = true;
-
-    mat.emissiveColor =
-        new BABYLON.Color3(
-            0.25,
-            0.25,
-            0.25
-        );
-
-    mat.alpha = 0.08;
-
-    flare.material = mat;
-
-    scene.registerBeforeRender(()=>{
-
-        flare.position.x =
-            Math.sin(
-                performance.now()*0.0002
-            )*1.2;
-
-    });
-
-}
-
-function createVignette(){
-
-    const pipeline =
-        new BABYLON.DefaultRenderingPipeline(
-            "pipe",
-            true,
-            scene,
-            [camera]
-        );
-
-    pipeline.imageProcessingEnabled = true;
-
-    pipeline.vignetteEnabled = true;
-
-    pipeline.vignetteWeight = 2.5;
-
-    pipeline.vignetteStretch = 0.4;
-
-}
-
-function loadImage(file){
-
-    const reader =
-        new FileReader();
-
-    reader.onload = function(e){
-
-        const img =
-            new Image();
-
-        img.onload = function(){
-
-            const aspect =
-                img.width /
-                img.height;
-
-            plane.scaling.x =
-                aspect;
-
-            plane.scaling.y = 1;
-
-            planeMaterial.diffuseTexture =
-                new BABYLON.Texture(
-                    img.src,
-                    scene
-                );
-
-        };
-
-        img.src =
-            e.target.result;
-
-    };
-
-    reader.readAsDataURL(file);
-}
-
-document
-.getElementById("fileInput")
-.addEventListener(
-"change",
-(e)=>{
-
-    if(!scene)
-        createScene();
-
-    loadImage(
-        e.target.files[0]
-    );
-
-    document
-    .getElementById("ui")
-    .style.display =
-    "none";
-
-});
-
-engine.runRenderLoop(()=>{
-
-    if(!scene) return;
-
-    zoom += 0.00005;
-
-    plane.scaling.scaleInPlace(
-        1.00001
-    );
-
-    scene.render();
-
-});
-
-window.addEventListener(
-"resize",
-()=>engine.resize()
-);
 
 </script>
 
