@@ -1,40 +1,279 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<title>SkyPislzda</title>
+<meta charset="utf-8">
+<title>Maxx Fridd Visual</title>
+
 <style>
-html, body {
-  margin: 0;
-  overflow: hidden;
-  background: black;
-  height: 100%;
+html,body{
+margin:0;
+height:100%;
+background:#000;
+overflow:hidden;
+display:flex;
+justify-content:center;
+align-items:center;
 }
-#renderCanvas {
-  width: 100vw;
-  height: 100vh;
-  display: block;
+
+#controls{
+position:absolute;
+z-index:10;
+display:flex;
+gap:10px;
 }
-#hint {
-  position: absolute;
-  bottom: 20px;
-  width: 100%;
-  text-align: center;
-  color: rgba(255,255,255,0.4);
-  font-family: sans-serif;
-  font-size: 14px;
+
+canvas{
+height:100vh;
+aspect-ratio:9/16;
+display:block;
 }
 </style>
-<script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
-
 <body>
-<canvas id="renderCanvas"></canvas>
-<div id="hint">Click to load image</div>
-<input type="file" id="fileInput" accept="image/*" style="display:none"/>
+
+<div id="controls">
+<input type="file" id="imageInput" accept="image/*">
+<input type="file" id="audioInput" accept="audio/*">
+</div>
+
+<canvas id="c"></canvas>
 
 <script>
-const canvas = document.getElementById("renderCanvas");
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+let W,H;
+
+function resize(){
+    H = window.innerHeight;
+    W = H * 9 / 16;
+
+    canvas.width = W;
+    canvas.height = H;
+}
+resize();
+window.addEventListener("resize",resize);
+
+let image = null;
+
+const particles = [];
+
+for(let i=0;i<250;i++){
+    particles.push({
+        x:Math.random()*W,
+        y:Math.random()*H,
+        s:Math.random()*2+0.5,
+        vx:(Math.random()-0.5)*0.2,
+        vy:(Math.random()-0.5)*0.2
+    });
+}
+
+let analyser = null;
+let dataArray = null;
+let audioLevel = 0;
+
+document.getElementById("audioInput").addEventListener("change",e=>{
+
+    const file = e.target.files[0];
+
+    const audio = new Audio(URL.createObjectURL(file));
+    audio.loop = true;
+
+    const audioCtx = new AudioContext();
+
+    const src = audioCtx.createMediaElementSource(audio);
+
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+
+    src.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    audio.play();
+
+});
+
+document.getElementById("imageInput").addEventListener("change",e=>{
+
+    const file = e.target.files[0];
+
+    image = new Image();
+
+    image.onload = ()=>{
+
+        document.getElementById("controls").style.display="none";
+
+    }
+
+    image.src = URL.createObjectURL(file);
+
+});
+
+function getAudioLevel(){
+
+    if(!analyser) return 0;
+
+    analyser.getByteFrequencyData(dataArray);
+
+    let sum=0;
+
+    for(let i=0;i<dataArray.length;i++){
+        sum+=dataArray[i];
+    }
+
+    return sum/dataArray.length/255;
+
+}
+
+let time=0;
+
+function render(){
+
+    requestAnimationFrame(render);
+
+    time += 0.01;
+
+    audioLevel = getAudioLevel();
+
+    ctx.clearRect(0,0,W,H);
+
+    if(image){
+
+        const imgRatio = image.width/image.height;
+        const canvasRatio = W/H;
+
+        let drawW, drawH;
+
+        if(imgRatio > canvasRatio){
+            drawH = H;
+            drawW = H*imgRatio;
+        }else{
+            drawW = W;
+            drawH = W/imgRatio;
+        }
+
+        const dx = (W-drawW)/2;
+        const dy = (H-drawH)/2;
+
+        const distortion =
+            Math.sin(time*2)*5 +
+            audioLevel*25;
+
+        ctx.drawImage(
+            image,
+            dx+distortion,
+            dy,
+            drawW,
+            drawH
+        );
+    }
+
+    // volumetric fog
+
+    for(let i=0;i<10;i++){
+
+        const y =
+            (i/10)*H +
+            Math.sin(time+i)*50;
+
+        const g = ctx.createLinearGradient(
+            0,y,
+            W,y+200
+        );
+
+        g.addColorStop(0,
+            `rgba(255,255,255,${
+            0.01+audioLevel*0.04
+            })`
+        );
+
+        g.addColorStop(1,
+            'rgba(255,255,255,0)'
+        );
+
+        ctx.fillStyle=g;
+
+        ctx.fillRect(
+            0,
+            y,
+            W,
+            250
+        );
+    }
+
+    // particles
+
+    particles.forEach(p=>{
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if(p.x<0)p.x=W;
+        if(p.x>W)p.x=0;
+
+        if(p.y<0)p.y=H;
+        if(p.y>H)p.y=0;
+
+        const alpha =
+            0.05 +
+            audioLevel*0.2;
+
+        ctx.fillStyle=
+            `rgba(255,255,255,${alpha})`;
+
+        ctx.beginPath();
+
+        ctx.arc(
+            p.x,
+            p.y,
+            p.s + audioLevel*2,
+            0,
+            Math.PI*2
+        );
+
+        ctx.fill();
+
+    });
+
+    // audio pulse
+
+    const pulse =
+        20 +
+        audioLevel*200;
+
+    const grad =
+        ctx.createRadialGradient(
+            W/2,H/2,
+            0,
+            W/2,H/2,
+            pulse*4
+        );
+
+    grad.addColorStop(
+        0,
+        `rgba(255,255,255,${
+        audioLevel*0.2
+        })`
+    );
+
+    grad.addColorStop(
+        1,
+        'rgba(255,255,255,0)'
+    );
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,W,H);
+
+}
+
+render();
+
+</script>
+</body>
+</html>const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
 
 let scene;
