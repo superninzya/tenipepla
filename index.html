@@ -1,380 +1,483 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Visual FX</title>
-
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>MAXX FRIDD — 9:16</title>
 <style>
-html, body{
-    margin:0;
-    background:#000;
-    overflow:hidden;
-    height:100%;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    font-family:Arial,sans-serif;
-}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: Arial, sans-serif; }
 
-#container{
-    position:relative;
-}
+  /* ====== ТУТ МЕНЯТЬ ИМЕНА ФАЙЛОВ (см. CONFIG в <script> ниже) ====== */
 
-canvas{
-    display:block;
-    background:#000;
-}
+  #stageWrap {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #000;
+  }
 
-.controls{
-    position:fixed;
-    top:10px;
-    left:10px;
-    z-index:10;
-    display:flex;
-    gap:10px;
-}
+  /* Жёсткое соотношение 9:16, вписанное в экран любого телефона */
+  #stage {
+    display: block;
+    background: #000;
+    width:  min(100vw, calc(100vh * 9 / 16));
+    height: min(100vh, calc(100vw * 16 / 9));
+  }
+
+  #ui {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px;
+    pointer-events: none;
+  }
+
+  #loadingMsg {
+    color: rgba(255,255,255,0.55);
+    font-size: 13px; letter-spacing: 3px;
+  }
+
+  button {
+    pointer-events: all;
+    padding: 12px 32px; font-size: 14px; letter-spacing: 4px;
+    border: 1px solid rgba(255,255,255,0.2); cursor: pointer;
+    background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.75);
+    transition: all 0.25s;
+  }
+  button:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+  #recBtn {
+    background: rgba(255,0,0,0.15); color: rgba(255,100,100,0.9);
+    border-color: rgba(255,80,80,0.3);
+  }
+  #recBtn:hover { background: rgba(255,0,0,0.3); }
+  #recBtn.recording { background: rgba(255,0,0,0.4); color: #fff; animation: recPulse 1s infinite; }
+  @keyframes recPulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .hidden { display: none !important; }
 </style>
 </head>
 <body>
 
-<div class="controls">
-    <input type="file" id="imageInput" accept="image/*">
-    <input type="file" id="audioInput" accept="audio/*">
-</div>
-
-<div id="container">
-    <canvas id="canvas" width="1080" height="1920"></canvas>
+<div id="stageWrap">
+  <canvas id="stage" width="1080" height="1920"></canvas>
+  <div id="ui">
+    <div id="loadingMsg">ЗАГРУЗКА...</div>
+    <button id="playBtn" class="hidden">▶ PLAY</button>
+    <button id="recBtn" class="hidden">⏺ REC</button>
+  </div>
 </div>
 
 <script>
+/* =======================================================================
+   НАСТРОЙКИ — ЕДИНСТВЕННОЕ МЕСТО, КОТОРОЕ НУЖНО ТРОГАТЬ
+   Просто положи файлы фото и аудио в тот же репозиторий GitHub Pages
+   и укажи их имена ниже. Выбора файлов на телефоне нет — всё захардкожено.
+   ======================================================================= */
+const CONFIG = {
+  IMAGE_SRC:  './background.jpg',   // <- имя файла картинки в репозитории
+  AUDIO_SRC:  './audio.mp3',        // <- имя аудиофайла в репозитории
+  OUT_W: 1080,                      // ширина итогового видео (9:16)
+  OUT_H: 1920,                      // высота итогового видео
+  SHOW_TITLE: true,
+  TITLE_TEXT: 'MAXX FRIDD'
+};
 
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+const stage = document.getElementById('stage');
+stage.width = CONFIG.OUT_W;
+stage.height = CONFIG.OUT_H;
+const ctx = stage.getContext('2d');
+const W = CONFIG.OUT_W, H = CONFIG.OUT_H;
 
-const W = canvas.width;
-const H = canvas.height;
+// =============================================
+// ЗАГРУЗКА АССЕТОВ
+// =============================================
+let imgReady = false, audioReady = false;
 
-let image = null;
+const img = new Image();
+img.onload  = () => { imgReady = true; checkReady(); };
+img.onerror = () => showError('Не найдена картинка: ' + CONFIG.IMAGE_SRC);
+img.src = CONFIG.IMAGE_SRC;
 
-const particles = [];
+const audioEl = new Audio();
+audioEl.loop = true;
+audioEl.preload = 'auto';
+const markAudioReady = () => { audioReady = true; checkReady(); };
+audioEl.addEventListener('loadeddata', markAudioReady, { once: true });
+audioEl.addEventListener('canplay', markAudioReady, { once: true });
+audioEl.addEventListener('error', () => showError('Не найдено аудио: ' + CONFIG.AUDIO_SRC));
+audioEl.src = CONFIG.AUDIO_SRC;
+setTimeout(() => { if (!audioReady) markAudioReady(); }, 6000); // защита от зависания загрузки
 
-for(let i=0;i<200;i++){
-    particles.push({
-        x:Math.random()*W,
-        y:Math.random()*H,
-        r:Math.random()*4+1,
-        speed:Math.random()*0.4+0.1,
-        alpha:Math.random()
-    });
+function checkReady() {
+  if (imgReady && audioReady) {
+    document.getElementById('loadingMsg').classList.add('hidden');
+    document.getElementById('playBtn').classList.remove('hidden');
+  }
+}
+function showError(msg) {
+  const el = document.getElementById('loadingMsg');
+  el.textContent = msg;
+  el.style.color = '#ff6666';
 }
 
-let analyser = null;
-let freqData = null;
+// =============================================
+// УТИЛИТЫ
+// =============================================
+function triWave(t) { const p = (t % 1 + 1) % 1; return p < 0.5 ? p * 4 - 1 : 3 - p * 4; }
+function easedTri(t) { const r = triWave(t) * 0.5 + 0.5, s = r * r * (3 - 2 * r); return s * 2 - 1; }
 
-document.getElementById("imageInput").addEventListener("change",(e)=>{
+// =============================================
+// ФОН — медленный "ken burns" zoom/pan, обрезка под 9:16 (cover)
+// =============================================
+let camT = 0;
+function drawBackground(dt) {
+  if (!imgReady) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); return; }
+  camT += dt * 0.00002;
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const zoom = 1.08 + 0.06 * (easedTri(camT * 0.3) * 0.5 + 0.5);
+  const scale = Math.max(W / iw, H / ih) * zoom;
+  const dw = iw * scale, dh = ih * scale;
+  const panX = easedTri(camT * 0.22) * 0.5 * (dw - W);
+  const panY = easedTri(camT * 0.17 + 0.3) * 0.5 * (dh - H);
+  const dx = (W - dw) / 2 - panX;
+  const dy = (H - dh) / 2 - panY;
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
 
-    const file = e.target.files[0];
-    if(!file) return;
 
-    const reader = new FileReader();
+const particles = Array.from({ length: 70 }, () => ({
+  x: Math.random(), y: Math.random(),
+  r: 0.5 + Math.random() * 1.5,
+  alpha: 0.22 + Math.random() * 0.48,
+  vx: (Math.random() - 0.5) * 0.00006,
+  vy: -0.00002 - Math.random() * 0.00007,
+  twinkleSpeed: 0.3 + Math.random() * 1.5,
+  twinklePhase: Math.random() * Math.PI * 2,
+  r_col: 220 + Math.floor(Math.random() * 35),
+  g_col: 185 + Math.floor(Math.random() * 50),
+  b_col: 130 + Math.floor(Math.random() * 60),
+}));
 
-    reader.onload = function(ev){
+let fxTime = 0;
+function drawParticles(dt) {
+  fxTime += dt;
+  for (const p of particles) {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.y < -0.02) { p.y = 1.02; p.x = Math.random(); }
+    if (p.x < -0.02) p.x = 1.02;
+    if (p.x > 1.02) p.x = -0.02;
+    const tw = 0.4 + 0.6 * Math.abs(Math.sin(fxTime * p.twinkleSpeed * 0.001 + p.twinklePhase));
+    const a = p.alpha * tw;
+    const px = p.x * W, py = p.y * H;
+    const pg = ctx.createRadialGradient(px, py, 0, px, py, p.r * 3);
+    pg.addColorStop(0, `rgba(${p.r_col},${p.g_col},${p.b_col},${a * 0.30})`);
+    pg.addColorStop(1, `rgba(${p.r_col},${p.g_col},${p.b_col},0)`);
+    ctx.fillStyle = pg;
+    ctx.beginPath(); ctx.arc(px, py, p.r * 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(${p.r_col},${p.g_col},${p.b_col},${Math.min(a * 1.2, 1)})`;
+    ctx.beginPath(); ctx.arc(px, py, p.r, 0, Math.PI * 2); ctx.fill();
+  }
+}
 
-        image = new Image();
+// =============================================
+// АУДИОВИЗУАЛ — реагирует на реальный звук (AnalyserNode)
+// =============================================
+let audioCtx = null, analyser = null, freqData = null, timeData = null, streamDest = null, sourceNode = null;
+let started = false;
 
-        image.onload = ()=>{
-            animate();
-        };
+function setupAudioGraph() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  sourceNode = audioCtx.createMediaElementSource(audioEl);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.82;
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  timeData = new Uint8Array(analyser.fftSize);
+  sourceNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
+  streamDest = audioCtx.createMediaStreamDestination();
+  sourceNode.connect(streamDest);
+}
 
-        image.src = ev.target.result;
-    };
+let vizTime = 0;
+function drawViz(dt) {
+  vizTime += dt * 0.001;
+  const cx = W / 2, cy = H * 0.42;
+  const R = Math.min(W, H) * 0.30;
 
-    reader.readAsDataURL(file);
-});
-
-document.getElementById("audioInput").addEventListener("change", async (e)=>{
-
-    const file = e.target.files[0];
-    if(!file) return;
-
-    const audio = new Audio(URL.createObjectURL(file));
-
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-    const source = audioCtx.createMediaElementSource(audio);
-
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-
-    source.connect(analyser);
-    analyser.connect(audioCtx.destination);
-
-    freqData = new Uint8Array(analyser.frequencyBinCount);
-
-    audio.play();
-});
-
-function getAudioLevel(){
-
-    if(!analyser) return 0;
-
+  let bass = 0, mid = 0, treble = 0, overall = 0;
+  if (started && analyser) {
     analyser.getByteFrequencyData(freqData);
+    analyser.getByteTimeDomainData(timeData);
+    const n = freqData.length;
+    const b1 = Math.floor(n * 0.08), b2 = Math.floor(n * 0.35);
+    for (let i = 0; i < b1; i++) bass += freqData[i];
+    for (let i = b1; i < b2; i++) mid += freqData[i];
+    for (let i = b2; i < n; i++) treble += freqData[i];
+    bass /= (b1 || 1); mid /= ((b2 - b1) || 1); treble /= ((n - b2) || 1);
+    overall = (bass + mid + treble) / 3 / 255;
+    bass /= 255; mid /= 255; treble /= 255;
+  }
 
-    let sum=0;
+  // дышащее внешнее кольцо (реагирует на бас)
+  const ringR = R * (0.86 + 0.18 * bass);
+  const ringGrad = ctx.createRadialGradient(cx, cy, ringR * 0.8, cx, cy, ringR);
+  ringGrad.addColorStop(0, 'rgba(255,220,140,0)');
+  ringGrad.addColorStop(0.5, `rgba(255,210,120,${0.05 + 0.08 * bass})`);
+  ringGrad.addColorStop(0.85, `rgba(255,190,80,${0.10 + 0.12 * bass})`);
+  ringGrad.addColorStop(1, 'rgba(255,160,50,0)');
+  ctx.fillStyle = ringGrad;
+  ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.fill();
 
-    for(let i=0;i<freqData.length;i++){
-        sum += freqData[i];
+  // полярный осциллограф из реальной waveform
+  if (started && analyser) {
+    ctx.beginPath();
+    const steps = timeData.length;
+    const skip = 4; // не рисуем каждую точку — для производительности и плавности
+    for (let i = 0; i <= steps; i += skip) {
+      const idx = i % steps;
+      const amp = (timeData[idx] - 128) / 128;
+      const angle = (i / steps) * Math.PI * 2 - Math.PI / 2 + vizTime * 0.05;
+      const rad = R * 0.62 + amp * R * 0.30;
+      const x = cx + Math.cos(angle) * rad, y = cy + Math.sin(angle) * rad;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(255,225,160,${0.45 + 0.35 * mid})`;
+    ctx.lineWidth = 1.6 + 1.4 * mid;
+    ctx.stroke();
+  }
 
-    return sum/freqData.length/255;
-}
-
-function drawImage(){
-
-    if(!image) return;
-
-    ctx.drawImage(
-        image,
-        0,
-        0,
-        W,
-        H
-    );
-}
-
-function drawFog(time, audio){
-
-    const fogAlpha = 0.03 + audio*0.08;
-
-    for(let i=0;i<6;i++){
-
-        const x =
-            W*0.5 +
-            Math.sin(time*0.0002+i)*300;
-
-        const y =
-            H*0.5 +
-            Math.cos(time*0.00015+i)*600;
-
-        const radius =
-            450 +
-            Math.sin(time*0.001+i)*150;
-
-        const g = ctx.createRadialGradient(
-            x,y,0,
-            x,y,radius
-        );
-
-        g.addColorStop(0,`rgba(255,255,255,${fogAlpha})`);
-        g.addColorStop(1,"rgba(255,255,255,0)");
-
-        ctx.fillStyle=g;
-        ctx.beginPath();
-        ctx.arc(x,y,radius,0,Math.PI*2);
-        ctx.fill();
+  // радиальные частотные полоски
+  const bars = 40;
+  for (let i = 0; i < bars; i++) {
+    let v = 0.05;
+    if (started && analyser) {
+      const bin = Math.floor((i / bars) * freqData.length * 0.7);
+      v = freqData[bin] / 255;
     }
+    const angle = (i / bars) * Math.PI * 2;
+    const inner = R * 0.70, len = R * 0.30 * Math.max(0.05, v);
+    const x1 = cx + Math.cos(angle) * inner, y1 = cy + Math.sin(angle) * inner;
+    const x2 = cx + Math.cos(angle) * (inner + len), y2 = cy + Math.sin(angle) * (inner + len);
+    ctx.strokeStyle = `rgba(255,200,110,${0.25 + 0.5 * v})`;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+
+  // центральное свечение, пульсирует от общей громкости
+  const glowR = R * (0.16 + 0.10 * overall);
+  const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+  glowGrad.addColorStop(0, `rgba(255,245,200,${0.35 + 0.35 * overall})`);
+  glowGrad.addColorStop(0.4, 'rgba(255,220,130,0.18)');
+  glowGrad.addColorStop(1, 'rgba(255,180,60,0)');
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath(); ctx.arc(cx, cy, glowR, 0, Math.PI * 2); ctx.fill();
 }
 
-function drawLightBeams(time,audio){
-
-    ctx.save();
-
-    ctx.globalCompositeOperation="screen";
-
-    for(let i=0;i<8;i++){
-
-        const angle =
-            time*0.00005 +
-            i*0.7;
-
-        const x =
-            W/2 +
-            Math.sin(angle)*400;
-
-        const beamWidth =
-            60 +
-            audio*250;
-
-        const grad =
-            ctx.createLinearGradient(
-                x,0,
-                x,H
-            );
-
-        grad.addColorStop(
-            0,
-            `rgba(255,255,255,${0.04+audio*0.12})`
-        );
-
-        grad.addColorStop(
-            1,
-            "rgba(255,255,255,0)"
-        );
-
-        ctx.fillStyle=grad;
-
-        ctx.fillRect(
-            x-beamWidth/2,
-            0,
-            beamWidth,
-            H
-        );
+// =============================================
+// ЗАГОЛОВОК (опционально, см. CONFIG.SHOW_TITLE)
+// =============================================
+function drawTitle(now) {
+  const alpha = 0.45 + 0.25 * Math.abs(Math.sin(now * 0.0003));
+  ctx.save();
+  ctx.font = '700 56px Arial';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const letters = CONFIG.TITLE_TEXT.split('');
+  const spacing = 18;
+  const totalWidth = letters.reduce((s, l) => s + ctx.measureText(l).width, 0) + spacing * (letters.length - 1);
+  let lx = W / 2 - totalWidth / 2;
+  const y = H * 0.86;
+  const glows = [
+    { blur: 80, color: `rgba(220,130,40,${alpha * 0.3})` },
+    { blur: 60, color: `rgba(255,160,60,${alpha * 0.5})` },
+    { blur: 25, color: `rgba(255,200,100,${alpha * 0.9})` },
+    { blur: 8,  color: `rgba(255,230,150,${alpha})` },
+  ];
+  for (const letter of letters) {
+    const lw = ctx.measureText(letter).width;
+    for (const g of glows) {
+      ctx.shadowBlur = g.blur; ctx.shadowColor = g.color; ctx.fillStyle = g.color;
+      ctx.fillText(letter, lx, y);
     }
-
-    ctx.restore();
+    ctx.shadowBlur = 10; ctx.shadowColor = `rgba(255,230,160,${alpha})`;
+    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.95})`;
+    ctx.fillText(letter, lx, y);
+    lx += lw + spacing;
+  }
+  ctx.restore();
 }
 
-function drawParticles(audio){
+// =============================================
+// ВИНЬЕТКА (кэшируется один раз)
+// =============================================
+const vignetteCanvas = document.createElement('canvas');
+vignetteCanvas.width = W; vignetteCanvas.height = H;
+(function () {
+  const v = vignetteCanvas.getContext('2d');
+  const grad = v.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  v.fillStyle = grad; v.fillRect(0, 0, W, H);
+})();
 
-    ctx.save();
-
-    ctx.globalCompositeOperation="screen";
-
-    particles.forEach(p=>{
-
-        p.y -= p.speed + audio*3;
-
-        if(p.y < -10){
-            p.y = H + 10;
-            p.x = Math.random()*W;
-        }
-
-        ctx.beginPath();
-
-        ctx.fillStyle =
-            `rgba(255,255,255,${
-                p.alpha*(0.3+audio)
-            })`;
-
-        ctx.arc(
-            p.x,
-            p.y,
-            p.r + audio*4,
-            0,
-            Math.PI*2
-        );
-
-        ctx.fill();
-    });
-
-    ctx.restore();
+// =============================================
+// АНАЛОГОВЫЙ ЭФФЕКТ: SCANLINES + GRAIN + GLITCH (VHS)
+// =============================================
+const scanTile = document.createElement('canvas');
+scanTile.width = 1; scanTile.height = 4;
+(function () {
+  const s = scanTile.getContext('2d');
+  s.clearRect(0, 0, 1, 4);
+  s.fillStyle = 'rgba(0,0,0,0.35)';
+  s.fillRect(0, 0, 1, 1);
+})();
+const scanPattern = ctx.createPattern(scanTile, 'repeat');
+let scanOffset = 0;
+function drawScanlines(dt) {
+  scanOffset += dt * 0.01;
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  try { scanPattern.setTransform(new DOMMatrix().translate(0, scanOffset % 4)); } catch (e) {}
+  ctx.fillStyle = scanPattern;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 }
 
-function drawVisualizer(audio){
-
-    const bars = 64;
-
-    const centerY = H*0.85;
-
-    ctx.save();
-
-    ctx.globalCompositeOperation="screen";
-
-    for(let i=0;i<bars;i++){
-
-        let v = audio;
-
-        if(freqData){
-            v = freqData[i]/255;
-        }
-
-        const x =
-            (i/(bars-1))*W;
-
-        const h =
-            30 +
-            v*400;
-
-        const grad =
-            ctx.createLinearGradient(
-                0,
-                centerY-h,
-                0,
-                centerY
-            );
-
-        grad.addColorStop(
-            0,
-            "rgba(255,255,255,0.9)"
-        );
-
-        grad.addColorStop(
-            1,
-            "rgba(255,255,255,0)"
-        );
-
-        ctx.fillStyle=grad;
-
-        ctx.fillRect(
-            x-4,
-            centerY-h,
-            8,
-            h
-        );
-    }
-
-    ctx.restore();
+const noiseCanvas = document.createElement('canvas');
+noiseCanvas.width = 180; noiseCanvas.height = 320;
+const noiseCtx = noiseCanvas.getContext('2d');
+const noiseImg = noiseCtx.createImageData(180, 320);
+function updateNoise() {
+  const buf = noiseImg.data;
+  for (let i = 0; i < buf.length; i += 4) {
+    const v = Math.random() * 255;
+    buf[i] = buf[i + 1] = buf[i + 2] = v;
+    buf[i + 3] = 255;
+  }
+  noiseCtx.putImageData(noiseImg, 0, 0);
+}
+function drawGrain() {
+  updateNoise();
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.drawImage(noiseCanvas, 0, 0, W, H);
+  ctx.restore();
 }
 
-function drawGlow(audio){
-
-    const radius =
-        300 +
-        audio*600;
-
-    const g =
-        ctx.createRadialGradient(
-            W/2,
-            H/2,
-            0,
-            W/2,
-            H/2,
-            radius
-        );
-
-    g.addColorStop(
-        0,
-        `rgba(255,255,255,${0.05+audio*0.2})`
-    );
-
-    g.addColorStop(
-        1,
-        "rgba(255,255,255,0)"
-    );
-
-    ctx.fillStyle=g;
-    ctx.fillRect(0,0,W,H);
+let glitchActive = false, glitchUntil = 0, nextGlitchAt = performance.now() + 4000 + Math.random() * 5000;
+function maybeTriggerGlitch(now) {
+  if (!glitchActive && now > nextGlitchAt) {
+    glitchActive = true;
+    glitchUntil = now + 110 + Math.random() * 180;
+    nextGlitchAt = now + 4000 + Math.random() * 9000;
+  }
+  if (glitchActive && now > glitchUntil) glitchActive = false;
+}
+function drawGlitch() {
+  if (!glitchActive) return;
+  const slices = 2 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < slices; i++) {
+    const y = Math.random() * H;
+    const h = 6 + Math.random() * 40;
+    const dx = (Math.random() - 0.5) * 30;
+    try { ctx.drawImage(stage, 0, y, W, h, dx, y, W, h); } catch (e) {}
+  }
+  ctx.save();
+  ctx.globalAlpha = 0.05;
+  ctx.fillStyle = 'rgba(255,255,255,1)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 }
 
-let started=false;
-
-function animate(time=0){
-
-    if(started===false){
-        started=true;
-    }
-
-    requestAnimationFrame(animate);
-
-    ctx.clearRect(0,0,W,H);
-
-    const audio = getAudioLevel();
-
-    drawImage();
-
-    drawFog(time,audio);
-
-    drawLightBeams(time,audio);
-
-    drawParticles(audio);
-
-    drawGlow(audio);
-
-    drawVisualizer(audio);
+function drawFlicker() {
+  const f = 0.985 + Math.random() * 0.03;
+  if (f < 1) { ctx.fillStyle = `rgba(0,0,0,${(1 - f) * 0.6})`; ctx.fillRect(0, 0, W, H); }
+  else { ctx.fillStyle = `rgba(255,255,255,${(f - 1) * 0.6})`; ctx.fillRect(0, 0, W, H); }
 }
 
+// =============================================
+// ГЛАВНЫЙ ЦИКЛ
+// =============================================
+let lastTime = performance.now();
+function loop(now) {
+  const dt = now - lastTime; lastTime = now;
+
+  ctx.clearRect(0, 0, W, H);
+  drawBackground(dt);
+  drawParticles(dt);
+  drawViz(dt);
+  if (CONFIG.SHOW_TITLE) drawTitle(now);
+  ctx.drawImage(vignetteCanvas, 0, 0);
+  drawScanlines(dt);
+  drawGrain();
+  maybeTriggerGlitch(now);
+  drawGlitch();
+  drawFlicker();
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// =============================================
+// PLAY
+// =============================================
+document.getElementById('playBtn').addEventListener('click', async (e) => {
+  e.target.classList.add('hidden');
+  document.getElementById('recBtn').classList.remove('hidden');
+  if (!audioCtx) setupAudioGraph();
+  try { await audioCtx.resume(); } catch (err) {}
+  try { await audioEl.play(); } catch (err) { console.warn('audio play:', err); }
+  started = true;
+});
+
+// =============================================
+// ЗАПИСЬ ВИДЕО + АУДИО
+// =============================================
+let mediaRecorder = null, chunks = [];
+document.getElementById('recBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('recBtn');
+
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    btn.textContent = '⏺ REC';
+    btn.classList.remove('recording');
+    return;
+  }
+
+  if (!started) { alert('Сначала нажми PLAY'); return; }
+
+  const stream = stage.captureStream(30);
+  if (streamDest) {
+    const at = streamDest.stream.getAudioTracks()[0];
+    if (at) stream.addTrack(at);
+  }
+
+  const mimeType = MediaRecorder.isTypeSupported('video/mp4')
+    ? 'video/mp4'
+    : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+    ? 'video/webm;codecs=vp9'
+    : 'video/webm';
+
+  mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 12_000_000 });
+  chunks = [];
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const ext = mimeType.startsWith('video/mp4') ? '.mp4' : '.webm';
+    const blob = new Blob(chunks, { type: mimeType.startsWith('video/mp4') ? 'video/mp4' : 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'maxx_fridd_' + Date.now() + ext;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  mediaRecorder.start(100);
+  btn.textContent = '⏹ STOP';
+  btn.classList.add('recording');
+});
 </script>
-
 </body>
 </html>
